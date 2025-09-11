@@ -175,3 +175,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Local files
+log.txt
+list_checked.txt
+profile_whatsapp

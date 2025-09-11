@@ -1,24 +1,25 @@
+import datetime
+import os
 import shutil
 import time
-import os
 
-from utils import PROFILE_WHATSAPP_PATH
 from selenium import webdriver
+from selenium.common.exceptions import (ElementClickInterceptedException,
+                                        NoSuchElementException,
+                                        TimeoutException, WebDriverException)
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.wait import WebDriverWait
-from selenium.common.exceptions import (TimeoutException,
-                                        ElementClickInterceptedException,
-                                        WebDriverException,
-                                        NoSuchElementException)
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
-import datetime
+from selenium.webdriver.support.wait import WebDriverWait
+
 from log import LogFileMixin
+from utils import PROFILE_WHATSAPP_PATH
 
 
 class Whatsapp(LogFileMixin):
-    def __init__(self, msg_title: str, automatic_msg: str, headless: bool):
+    def __init__(self, msg_title: str, automatic_msg: str, headless: bool,
+                 check_messages: bool = True):
         self.options = Options()
         self.options.add_argument(
             r'user-data-dir={}'.format(PROFILE_WHATSAPP_PATH))
@@ -31,15 +32,17 @@ class Whatsapp(LogFileMixin):
         self.log = LogFileMixin()
         self.driver = None
         self.active_start = False
+        self.check_messages = check_messages
 
     def start(self):
         try:
-            self.driver = webdriver.Chrome(
-                options=self.options)
+            # Selenium irá buscar o chromedriver automaticamente no PATH
+            self.driver = webdriver.Chrome(options=self.options)
         except WebDriverException as e:
             print('webdriver', e.__class__.__name__)
             if os.path.exists(PROFILE_WHATSAPP_PATH):
                 shutil.rmtree(PROFILE_WHATSAPP_PATH)
+            raise e
         self.driver.get('https://web.whatsapp.com/')
         self.driver.maximize_window()
 
@@ -60,7 +63,7 @@ class Whatsapp(LogFileMixin):
         try:
             new_chat = self.wait.until(
                 lambda x: x.find_element(
-                    By.XPATH, '//button[@aria-label="Nova conversa"]'
+                    By.XPATH, '//*[@aria-label="Nova conversa"]'
                 )
             )
             new_chat.click()
@@ -73,7 +76,7 @@ class Whatsapp(LogFileMixin):
             search_bar = self.wait.until(
                 lambda x: x.find_element(
                     By.XPATH,
-                    '//div[@aria-label="Pesquisar nome ou número"]'
+                    '//*[@aria-label="Pesquisar nome ou número"]'
                 )
             )
             search_bar.send_keys(phone_number)
@@ -179,69 +182,142 @@ class Whatsapp(LogFileMixin):
 
         time.sleep(1)
 
-        try:
-            days = self.wait.until(lambda x: x.find_elements(
-                By.XPATH, '//*[@id="main"]/div[3]/div/div[2]/div[3]'
-            ))
-        except TimeoutException as e:
-            self.log_success(f'{e.__class__.__name__} {phone_number}'
-                             ' before send msg')
+        # Se a checagem de mensagens estiver desabilitada, envia direto
+        if not self.check_messages:
+            self.log_success(f'{phone_number} message check disabled')
             self.send_msg()
-            self.log_success(f'{e.__class__.__name__} {phone_number}'
-                             ' later send msg')
+            self.log_success(f'{phone_number} message sent without check')
             return
+
+        # Verifica se já existe mensagem com código do pedido
+        has_order_code = self._has_order_code_message()
+        self.log_success(f'{phone_number} order code result: {has_order_code}')
+
+        if has_order_code:
+            self.log_success(f'{phone_number} order code already found')
+            print('encontrou codigo do pedido')
+            return
+
+        # Se não encontrou código do pedido, envia mensagem
+        self.log_success(f'{phone_number} no order code found - sending msg')
+        print(f'Sending message to {phone_number}')
+        self.send_msg()
+        self.log_success(f'{phone_number} message sent')
+
+    def _has_order_code_message(self) -> bool:
+        """
+        Verifica se já existe uma mensagem com código do pedido no chat HOJE.
+        Busca por mensagens que contenham 'Código do pedido' junto com
+        'www.whatsmenu.com.br' ou o título da mensagem configurado,
+        mas apenas nas mensagens de hoje.
+        """
+        try:
+            # Busca todas as mensagens no chat usando a classe copyable-area
+            messages = self.wait.until(lambda x: x.find_elements(
+                By.CLASS_NAME, 'copyable-area'
+            ))
+
+            self.log_success(f'Found {len(messages)} messages to check')
+            print(f'Debug: Found {len(messages)} messages')
+
+            # Verifica cada mensagem
+            for i, message in enumerate(messages):
+                message_text = message.text.strip()
+                print(f'Debug: Message {i+1}: {message_text[:100]}...')
+
+                # Verifica se a mensagem é de hoje
+                if 'HOJE' in message_text:
+                    print(f'Debug: Message {i+1} contains HOJE')
+                    # Pega apenas o texto a partir de "HOJE"
+                    hoje_index = message_text.find('HOJE')
+                    today_message = message_text[hoje_index:]
+
+                    # Verifica se contém código do pedido
+                    if 'Código do pedido' in today_message:
+                        print(f'Debug: Found order code in message {i+1}')
+                        # Verifica se é do whatsmenu ou do título configurado
+                        if ('www.whatsmenu.com.br' in today_message or
+                                self.msg_title in today_message):
+                            self.log_success('Order code message found today')
+                            print('Debug: Order code from expected source')
+                            return True
+
+            self.log_success('No order code message found today')
+            return False
+
+        except TimeoutException:
+            self.log_error('Timeout waiting for messages')
+            return False
         except Exception as e:
-            self.log_error(f'days {e.__class__.__name__}')
-            print(e.__class__.__name__)
-            return
-        else:
-            self.log_success(f'{phone_number} days')
-            for day in days:
-                word_index = day.text.find('HOJE')
-                if word_index != -1:
-                    formated_word = day.text[word_index:]
-                    if 'www.whatsmenu.com.br' in formated_word and\
-                            'Código do pedido' in formated_word:
-                        self.log_success(f'{phone_number} whatsmenu'
-                                         'codigo do pedido')
-                        print('encontrou codigo do pedido')
-                        return
-                    elif self.msg_title in formated_word and\
-                            'Código do pedido' in formated_word:
-                        self.log_success(f'{phone_number} msg_title'
-                                         'codigo do pedido')
-                        print('encontrou codigo do pedido')
-                        return
-                    else:
-                        self.log_success(f'{phone_number} before send msg')
-                        self.send_msg()
-                        self.log_success(f'{phone_number} later send msg')
-                        return
-                else:
-                    self.log_success(f'{phone_number} before send msg')
-                    self.send_msg()
-                    self.log_success(f'{phone_number} later send msg')
-                    return
+            self.log_error(f'Error checking messages: {e.__class__.__name__}')
+            return False
 
     def send_msg(self):
+        print("Debug: Starting send_msg")
         try:
-            for msg in self.automatic_msg:
-                msg_box = self.wait.until(lambda x: x.find_element(
-                    By.XPATH,
-                    '//div[@aria-label="Digite uma mensagem"]'
-                ))
+            for i, msg in enumerate(self.automatic_msg):
+                print(f"Debug: Sending message {i+1}: {msg}")
+                # Tenta encontrar a caixa de texto de mensagem
+                try:
+                    # Tenta diferentes seletores para a caixa de mensagem
+                    msg_box = None
+
+                    # Opção 1: div contenteditable
+                    try:
+                        msg_box = self.wait.until(lambda x: x.find_element(
+                            By.XPATH,
+                            '//div[@contenteditable="true"][@data-tab="10"]'
+                        ))
+                        print("Debug: Found message box using contenteditable")
+                    except TimeoutException:
+                        pass
+
+                    # Opção 2: div com role textbox
+                    if not msg_box:
+                        try:
+                            msg_box = self.wait.until(lambda x: x.find_element(
+                                By.XPATH,
+                                '//div[@role="textbox"]'
+                            ))
+                            print("Debug: Found box using role=textbox")
+                        except TimeoutException:
+                            pass
+
+                    # Opção 3: qualquer elemento contenteditable
+                    if not msg_box:
+                        msg_box = self.wait.until(lambda x: x.find_element(
+                            By.XPATH,
+                            '//*[@contenteditable="true"]'
+                        ))
+                        print("Debug: Found box using contenteditable=true")
+
+                except TimeoutException:
+                    print("Debug: Could not find message box")
+                    self.log_error('Could not find message input box')
+                    return
+
+                # Limpa e envia a mensagem
+                print(f"Debug: Clicking message box and sending: {msg}")
+                msg_box.click()
+                msg_box.clear()
                 msg_box.send_keys(msg)
                 msg_box.send_keys(Keys.ENTER)
+                time.sleep(1)  # Pausa entre mensagens
+                print(f"Debug: Message {i+1} sent successfully")
+
         except AttributeError as e:
-            self.log_error(f'msg {e.__class__.__name__}')
+            self.log_error(f'msg AttributeError: {e.__class__.__name__}')
+            print(f"Debug: AttributeError: {e}")
+            return
+        except TimeoutException:
+            self.log_error('msg TimeoutException: Could not find message box')
             return
         except Exception as e:
-            self.log_error(f'msg {e.__class__.__name__}')
+            self.log_error(f'msg Exception: {e.__class__.__name__}')
             return
         else:
             time.sleep(1)
-            self.log_success('msg')
-            self.action.send_keys(Keys.CANCEL)
+            self.log_success('msg sent successfully')
             return
 
     def _login_(self):
@@ -322,7 +398,7 @@ class Whatsapp(LogFileMixin):
 
 if __name__ == '__main__':
     chat = Whatsapp('Beruchy Hamburgueria Delivery',
-                    'Recebemos o seu pedido.', True)
+                    'Recebemos o seu pedido.', True, True)
     chat.start()
     chat.check_number('99999999999')
     for _ in range(20):

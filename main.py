@@ -1,15 +1,17 @@
+import json
 import time
-import qdarkstyle
-from whatsapp import Whatsapp
-from whatsmenu import Whatsmenu
-from PySide6.QtWidgets import QApplication, QMainWindow
-from PySide6.QtGui import QIcon
-from PySide6.QtCore import Signal
 from threading import Thread
+
+import qdarkstyle
+from PySide6.QtCore import Signal
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QApplication, QMainWindow
+
 from mainwindow import Ui_MainWindow
 from settings_window import Ui_Settings
-from utils import SETTINGS_PROFILE_PATH, WINDOW_ICON_PATH, STYLE
-import json
+from utils import SETTINGS_PROFILE_PATH, STYLE, WINDOW_ICON_PATH
+from whatsapp import Whatsapp
+from whatsmenu import Whatsmenu
 
 
 class Interface(Ui_MainWindow, QMainWindow):
@@ -29,10 +31,12 @@ class Interface(Ui_MainWindow, QMainWindow):
         self.browser_headless = parameters['browser']
         self.wait_time = parameters['wait_time']
         self.log_on = parameters['log_on']
+        self.check_messages = parameters['check_messages']
         self.mythread = Thread(target=self.browsers)
         self.chat = Whatsapp(msg_title=self.msg_title,
                              automatic_msg=self.automatic_msg,
-                             headless=self.browser_headless)
+                             headless=self.browser_headless,
+                             check_messages=self.check_messages)
         self.chat.log_on = self.log_on
         self.whatsmenu = Whatsmenu(
             self.chat, self.browser_headless, self.wait_time)
@@ -63,7 +67,8 @@ class Interface(Ui_MainWindow, QMainWindow):
             self.mythread = Thread(target=self.browsers)
             self.chat = Whatsapp(msg_title=self.msg_title,
                                  automatic_msg=self.automatic_msg,
-                                 headless=self.browser_headless)
+                                 headless=self.browser_headless,
+                                 check_messages=self.check_messages)
             self.whatsmenu = Whatsmenu(
                 self.chat, self.browser_headless, self.wait_time)
 
@@ -99,6 +104,7 @@ class SettingWindow(Ui_Settings, QMainWindow):
         self.textEdit.setText(parameters['automatic_msg'])
         self.checkBox.setChecked(parameters['browser'])
         self.checkBox_2.setChecked(parameters['log_on'])
+        self.checkBox_3.setChecked(parameters['check_messages'])
         self.spinBox.setSpecialValueText(parameters['wait_time'])
 
     def apply_clicked(self) -> None:
@@ -108,6 +114,7 @@ class SettingWindow(Ui_Settings, QMainWindow):
         self.settings_dict['wait_time'] = self.spinBox.text()
         self.settings_dict['browser'] = self.checkBox.isChecked()
         self.settings_dict['log_on'] = self.checkBox_2.isChecked()
+        self.settings_dict['check_messages'] = self.checkBox_3.isChecked()
         with open(SETTINGS_PROFILE_PATH, 'w', encoding='utf-8') as file:
             json.dump(self.settings_dict, file, ensure_ascii=False)
         self.applied.emit(self.settings_dict)
@@ -119,10 +126,15 @@ if __name__ == '__main__':
     app = QApplication()
 
     settings_json = {'msg_title': '', 'automatic_msg': '',
-                     'browser': True, 'wait_time': '10', 'log_on': False}
+                     'browser': True, 'wait_time': '10', 'log_on': False,
+                     'check_messages': True}
     try:
         with open(SETTINGS_PROFILE_PATH, 'r', encoding='utf8') as file:
-            settings_json = json.load(file)
+            loaded_settings = json.load(file)
+            # Adicionar configurações padrão se não existirem
+            if 'check_messages' not in loaded_settings:
+                loaded_settings['check_messages'] = True
+            settings_json.update(loaded_settings)
     except Exception as e:
         print('json', e.__class__.__name__)
 
