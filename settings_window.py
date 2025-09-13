@@ -113,7 +113,7 @@ class Ui_Settings(object):
         self.label.setText(QCoreApplication.translate(
             "Settings", u"Message title:", None))
         self.checkBox.setText(QCoreApplication.translate(
-            "Settings", u"Browser", None))
+            "Settings", u"Force Visible (Debug)", None))
         self.checkBox_2.setText(
             QCoreApplication.translate("Settings", u"Log", None))
         self.checkBox_3.setText(QCoreApplication.translate(

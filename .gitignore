@@ -179,4 +179,7 @@ cython_debug/
 # Local files
 log.txt
 list_checked.txt
-profile_whatsapp
+profile_whatsapp/
+profile_whatsmenu/
+settings.json
+output/
