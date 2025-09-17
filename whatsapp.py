@@ -69,6 +69,7 @@ class Whatsapp(LogFileMixin):
 
         if not login_success:
             # Se está em modo visível, faz login normal
+            print(self.driver.current_url)
             self._login_()
 
         self.active_start = True
@@ -80,7 +81,7 @@ class Whatsapp(LogFileMixin):
         """
         try:
             # Espera um pouco menos para não travar muito em headless
-            wait_short = WebDriverWait(self.driver, 5)
+            wait_short = WebDriverWait(self.driver, 60)
             # Se encontrar o elemento principal do WhatsApp, está logado
             wait_short.until(lambda x: x.find_element(By.ID, 'side'))
             self.log_success('Already logged in')
@@ -91,12 +92,15 @@ class Whatsapp(LogFileMixin):
             try:
                 # Verifica se há QR code (precisa de login)
                 qr_code = self.driver.find_element(
-                    By.XPATH, '//*[@data-testid="qr-code"]'
+                    By.XPATH, '//*/canvas'
                 )
                 if qr_code:
                     self.log_success('QR Code detected - login needed')
                     print('QR Code detectado - login necessário')
                     return False
+                else:
+                    self.log_success('No QR Code found - assuming logged in')
+                    return True
             except NoSuchElementException:
                 pass
 
@@ -180,7 +184,7 @@ class Whatsapp(LogFileMixin):
             # Verifica se não está na tela de QR code
             try:
                 qr_code = self.driver.find_element(
-                    By.XPATH, '//*[@data-testid="qr-code"]'
+                    By.XPATH, '//*[@id="app"]/div[1]/div[2]/div[2]/div[2]/div/div[2]/div[1]/div[2]/div/div/canvas'
                 )
                 if qr_code:
                     self.log_error('Still showing QR code')
@@ -206,12 +210,6 @@ class Whatsapp(LogFileMixin):
         if not self._verify_interface_active():
             self.log_error('Interface not active - stopping operations')
             print('Interface não está ativa - parando operações WhatsApp')
-            return
-
-        # Verifica se ainda está logado antes de tentar usar
-        if not self._verify_whatsapp_loaded():
-            self.log_error('WhatsApp not properly loaded')
-            print('WhatsApp não está carregado corretamente')
             return
 
         try:
@@ -261,14 +259,14 @@ class Whatsapp(LogFileMixin):
             chat = self.wait.until(
                 lambda x: x.find_element(
                     By.XPATH,
-                    f'//span[@title="{formatted_phone_number}"]'
+                    f'//*[@title="{formatted_phone_number}"]'
                 )
             )
             time.sleep(1)
             chat.click()
             self.log_success(f'{phone_number} chat clicked')
             print('chat')
-        except ElementClickInterceptedException as e:
+        except ElementClickInterceptedException:
             try:
                 chat = self.wait.until(
                     lambda x: x.find_element(
@@ -279,7 +277,7 @@ class Whatsapp(LogFileMixin):
                 time.sleep(1)
                 chat.click()
                 self.log_success(f'{phone_number} chat clicked')
-            except Exception as e:
+            except Exception:
                 try:
                     back_button = self.wait.until(
                         lambda x: x.find_element(
@@ -434,15 +432,24 @@ class Whatsapp(LogFileMixin):
                     # Tenta diferentes seletores para a caixa de mensagem
                     msg_box = None
 
-                    # Opção 1: div contenteditable
                     try:
                         msg_box = self.wait.until(lambda x: x.find_element(
                             By.XPATH,
-                            '//div[@contenteditable="true"][@data-tab="10"]'
+                            '//*[@aria-placeholder="Digite uma mensagem"]'
                         ))
-                        print("Debug: Found message box using contenteditable")
+                        print("Debug: Found message box using placeholder")
                     except TimeoutException:
                         pass
+
+                    if not msg_box:
+                        try:
+                            msg_box = self.wait.until(lambda x: x.find_element(
+                                By.XPATH,
+                                '//div[@contenteditable="true"][@data-tab="10"]'
+                            ))
+                            print("Debug: Found message box using contenteditable")
+                        except TimeoutException:
+                            pass
 
                     # Opção 2: div com role textbox
                     if not msg_box:
@@ -572,7 +579,7 @@ if __name__ == '__main__':
     chat = Whatsapp('Beruchy Hamburgueria Delivery',
                     'Recebemos o seu pedido.', True, True)
     chat.start()
-    chat.check_number('99999999999')
+    # chat.check_number('99999999999')
     for _ in range(20):
         time.sleep(1)
     chat.check_number('85981647142')

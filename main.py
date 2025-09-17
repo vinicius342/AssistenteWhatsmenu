@@ -6,6 +6,7 @@ import qdarkstyle
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow
+from selenium.common.exceptions import NoSuchElementException
 
 from mainwindow import Ui_MainWindow
 from settings_window import Ui_Settings
@@ -24,6 +25,7 @@ class Interface(Ui_MainWindow, QMainWindow):
         self.config_drivers(parameters)
         self.settings.applied.connect(self.config_drivers)
         self.label.setObjectName('status_label')
+        self.interface_closed = False
 
     def config_drivers(self, parameters: dict):
         self.msg_title = parameters['msg_title']
@@ -42,9 +44,19 @@ class Interface(Ui_MainWindow, QMainWindow):
             self.chat, self.force_visible, self.wait_time)
 
     def browsers(self):
-        self.chat.start()
-        if self.chat.active_start:
-            self.whatsmenu.start()
+        try:
+            self.chat.start()
+        except NoSuchElementException as e:
+            print('start chat canceled', e.__class__.__name__)
+            return
+        except Exception as e:
+            print('start chat canceled', e.__class__.__name__)
+            return
+        if not self.interface_closed:
+            try:
+                self.whatsmenu.start()
+            except Exception as e:
+                print('start whatsmenu canceled', e.__class__.__name__)
 
     def button_click(self):
         if self.label.text() == 'OFF':
@@ -75,16 +87,18 @@ class Interface(Ui_MainWindow, QMainWindow):
             self.label.setText('OFF')
 
     def closeEvent(self, _):
+        self.interface_closed = True
 
-        if self.chat.driver != None:
+        if self.chat.driver is not None:
             try:
                 self.chat.close()
+                self.chat.driver.quit()
             except Exception as e:
                 print('chat close()', e.__class__.__name__)
-
-        if self.whatsmenu.driver != None:
+        if self.whatsmenu.driver is not None:
             try:
                 self.whatsmenu.close()
+                self.whatsmenu.driver.quit()
             except AttributeError as e:
                 print('whatsmenu close()', e.__class__.__name__)
 
