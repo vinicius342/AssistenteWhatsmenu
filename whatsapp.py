@@ -250,6 +250,7 @@ class Whatsapp(LogFileMixin):
                 )
             )
             search_bar.send_keys(phone_number)
+            time.sleep(2)
             self.log_success(f'{phone_number} search_bar send_keys')
         except Exception as e:
             print('search_bar', e.__class__.__name__)
@@ -264,19 +265,21 @@ class Whatsapp(LogFileMixin):
             )
             time.sleep(1)
             chat.click()
-            self.log_success(f'{phone_number} chat clicked')
+            self.log_success(
+                f'{formatted_phone_number} chat clicked for title')
             print('chat')
         except ElementClickInterceptedException:
             try:
                 chat = self.wait.until(
                     lambda x: x.find_element(
                         By.XPATH,
-                        f'//*[@id="app"]/div/div[3]/div/div[2]/div[1]/span/div/span/div/div[2]/div[3]/div[2]/div[1]/div/span'
+                        '//*[@id="app"]/div/div[3]/div/div[2]/div[1]/span/div/span/div/div[2]/div[3]/div[2]/div[1]/div/span'
                     )
                 )
                 time.sleep(1)
                 chat.click()
-                self.log_success(f'{phone_number} chat clicked')
+                self.log_success(
+                    f'{phone_number} chat clicked for absolute path')
             except Exception:
                 try:
                     back_button = self.wait.until(
@@ -307,6 +310,8 @@ class Whatsapp(LogFileMixin):
                     return
         except TimeoutException as e:
             try:
+                self.log_error(
+                    f'chat TimeoutException: {e.__class__.__name__}')
                 back_button = self.wait.until(
                     lambda x: x.find_element(
                         By.XPATH,
@@ -579,10 +584,10 @@ if __name__ == '__main__':
     chat = Whatsapp('Beruchy Hamburgueria Delivery',
                     'Recebemos o seu pedido.', True, True)
     chat.start()
-    # chat.check_number('99999999999')
+    chat.check_number('99999999999')
     for _ in range(20):
         time.sleep(1)
-    chat.check_number('85981647142')
+    chat.check_number('85981869957')
     for _ in range(20):
         time.sleep(1)
     chat.check_number('85981647142')

@@ -2,7 +2,6 @@ import json
 import time
 from threading import Thread
 
-import qdarkstyle
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow
@@ -45,6 +44,7 @@ class Interface(Ui_MainWindow, QMainWindow):
 
     def browsers(self):
         try:
+            time.sleep(3)
             self.chat.start()
         except NoSuchElementException as e:
             print('start chat canceled', e.__class__.__name__)
@@ -53,6 +53,7 @@ class Interface(Ui_MainWindow, QMainWindow):
             print('start chat canceled', e.__class__.__name__)
             return
         if not self.interface_closed:
+            time.sleep(3)
             try:
                 self.whatsmenu.start()
             except Exception as e:
