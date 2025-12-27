@@ -1,21 +1,55 @@
 import json
 import time
-from threading import Thread
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 from selenium.common.exceptions import NoSuchElementException
 
 from mainwindow import Ui_MainWindow
 from settings_window import Ui_Settings
 from utils import SETTINGS_PROFILE_PATH, STYLE, WINDOW_ICON_PATH
-from whatsapp import Whatsapp
+from whatsapp import LogFileMixin, Whatsapp
 from whatsmenu import Whatsmenu
 
 
+class BrowserThread(QThread, LogFileMixin):
+    finished = Signal()
+    error = Signal(str)
+
+    def __init__(self, chat, whatsmenu, interface_closed_callback):
+        super().__init__()
+        self.chat = chat
+        self.whatsmenu = whatsmenu
+        self.interface_closed = interface_closed_callback
+
+    def run(self):
+        try:
+            time.sleep(3)
+            self.chat.start()
+        except NoSuchElementException as e:
+            self.error.emit(f'start chat canceled {e.__class__.__name__}')
+            return
+        except Exception as e:
+            self.error.emit(f'start chat canceled {e.__class__.__name__}')
+            return
+
+        self.log_success('WhatsApp started successfully')
+
+        if not self.interface_closed():
+            time.sleep(7)
+            try:
+                self.log_success('Whatsmenu starting')
+                self.whatsmenu.start()
+            except Exception as e:
+                self.error.emit(
+                    f'start whatsmenu canceled {e.__class__.__name__}')
+
+        self.finished.emit()
+
+
 class Interface(Ui_MainWindow, QMainWindow):
-    def __init__(self, parent=None, parameters: dict = None) -> None:
+    def __init__(self, parent=None, parameters: dict = {}) -> None:
         super().__init__(parent)
         self.setupUi(self)
         self.settings = SettingWindow(parameters=parameters)
@@ -27,13 +61,23 @@ class Interface(Ui_MainWindow, QMainWindow):
         self.interface_closed = False
 
     def config_drivers(self, parameters: dict):
+        if parameters.get('altered_settings', False):
+            # Mostra mensagem ao usuário
+            print('Configurações alteradas - reinicie o serviço')
+            QMessageBox.information(self,
+                                    "Configurações",
+                                    "Clique em OFF e depois ON para "
+                                    "aplicar as novas configurações."
+                                    )
+            return
+
         self.msg_title = parameters['msg_title']
         self.automatic_msg = parameters['automatic_msg']
         self.force_visible = parameters.get('force_visible', False)
         self.wait_time = parameters['wait_time']
         self.log_on = parameters['log_on']
         self.check_messages = parameters['check_messages']
-        self.mythread = Thread(target=self.browsers)
+        self.browser_thread = None
         self.chat = Whatsapp(msg_title=self.msg_title,
                              automatic_msg=self.automatic_msg,
                              force_visible=self.force_visible,
@@ -42,31 +86,33 @@ class Interface(Ui_MainWindow, QMainWindow):
         self.whatsmenu = Whatsmenu(
             self.chat, self.force_visible, self.wait_time)
 
-    def browsers(self):
-        try:
-            time.sleep(3)
-            self.chat.start()
-        except NoSuchElementException as e:
-            print('start chat canceled', e.__class__.__name__)
-            return
-        except Exception as e:
-            print('start chat canceled', e.__class__.__name__)
-            return
-        if not self.interface_closed:
-            time.sleep(3)
-            try:
-                self.whatsmenu.start()
-            except Exception as e:
-                print('start whatsmenu canceled', e.__class__.__name__)
-
     def button_click(self):
         if self.label.text() == 'OFF':
-            self.mythread.start()
+            # Cria a thread
+            self.browser_thread = BrowserThread(
+                self.chat,
+                self.whatsmenu,
+                lambda: self.interface_closed
+            )
+
+            # Conecta os sinais
+            self.browser_thread.finished.connect(self.on_browser_finished)
+            self.browser_thread.error.connect(self.on_browser_error)
+
+            # Inicia
+            self.browser_thread.start()
+
             self.label.setText('ON')
             self.label.setStyleSheet('color: #2dff88')
             self.pushButton.setDisabled(True)
         else:
             self.whatsmenu.window_signal = True
+
+            # Para a thread se estiver rodando
+            if self.browser_thread and self.browser_thread.isRunning():
+                self.browser_thread.quit()
+                self.browser_thread.wait()
+
             try:
                 self.whatsmenu.driver.close()
             except Exception as e:
@@ -77,7 +123,7 @@ class Interface(Ui_MainWindow, QMainWindow):
             except Exception as e:
                 print('chat close()', e.__class__.__name__)
 
-            self.mythread = Thread(target=self.browsers)
+            # Recria os objetos
             self.chat = Whatsapp(msg_title=self.msg_title,
                                  automatic_msg=self.automatic_msg,
                                  force_visible=self.force_visible,
@@ -86,9 +132,15 @@ class Interface(Ui_MainWindow, QMainWindow):
                 self.chat, self.force_visible, self.wait_time)
 
             self.label.setText('OFF')
+            self.label.setStyleSheet('')
+            self.pushButton.setEnabled(True)
 
-    def closeEvent(self, _):
+    def closeEvent(self, event):
         self.interface_closed = True
+
+        if self.browser_thread and self.browser_thread.isRunning():
+            self.browser_thread.quit()
+            self.browser_thread.wait(5000)  # Espera até 5 segundos
 
         if self.chat.driver is not None:
             try:
@@ -106,11 +158,21 @@ class Interface(Ui_MainWindow, QMainWindow):
     def adjustsizefixed(self) -> None:
         self.setFixedSize(self.width(), self.height())
 
+    def on_browser_finished(self):
+        print("Navegadores iniciados com sucesso")
+        self.pushButton.setEnabled(True)
+
+    def on_browser_error(self, error_msg):
+        print(error_msg)
+        self.label.setText('ERROR')
+        self.label.setStyleSheet('color: red')
+        self.pushButton.setEnabled(True)
+
 
 class SettingWindow(Ui_Settings, QMainWindow):
     applied = Signal(dict)
 
-    def __init__(self, parent=None, parameters=None):
+    def __init__(self, parent=None, parameters=[]):
         super().__init__(parent)
         self.setupUi(self)
         self.pushButton.clicked.connect(self.apply_clicked)
@@ -139,6 +201,7 @@ class SettingWindow(Ui_Settings, QMainWindow):
         self.settings_dict['check_messages'] = self.checkBox_3.isChecked()
         with open(SETTINGS_PROFILE_PATH, 'w', encoding='utf-8') as file:
             json.dump(self.settings_dict, file, ensure_ascii=False)
+        self.settings_dict['altered_settings'] = True
         self.applied.emit(self.settings_dict)
         self.close()
 

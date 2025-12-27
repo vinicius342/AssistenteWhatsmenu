@@ -16,37 +16,53 @@ from selenium.webdriver.support.wait import WebDriverWait
 from log import LogFileMixin
 from utils import PROFILE_WHATSAPP_PATH
 
+SELECTORS_NEW_CHAT = ['//*[@data-icon="new-chat-outline"]',]
+XPATH_SEARCH_BAR = '//*[@aria-label="Pesquisar nome ou número"]'
+XPATH_CHAT_ABSOLUTE = '//*[@id="app"]/div/div[3]/div/div[2]/div[1]/' \
+    'span/div/span/div/div[2]/div[3]/div[2]/div[1]/div/span'
+XPATH_BACK_BUTTON = '//*[@data-icon="back-refreshed"]'
+
 
 class Whatsapp(LogFileMixin):
     def __init__(self, msg_title: str, automatic_msg: str,
                  force_visible: bool = False, check_messages: bool = True):
         self.options = Options()
         self.options.add_argument(
-            r'user-data-dir={}'.format(PROFILE_WHATSAPP_PATH))
-        self.force_visible = force_visible  # Para debug/setup manual
-        self.msg_title = msg_title  # Tenho que no app
-        # Tenho que colocar no app
+            r'user-data-dir={}'.format(PROFILE_WHATSAPP_PATH)
+        )
+        self.options.add_argument(r'--headless')
+        self.force_visible = force_visible
+        self.msg_title = msg_title
         self.automatic_msg = automatic_msg.split('\n')
         self.window_signal = False
         self.log = LogFileMixin()
-        self.driver = None
+        self.driver = webdriver.Chrome(options=self.options)
         self.active_start = False
         self.check_messages = check_messages
         self.login_needed = False
 
     def start(self):
         # Sempre começa em headless, exceto se forçado a ser visível
-        if not self.force_visible:
-            self.options.add_argument(r'--headless')
+        if self.force_visible:
+            try:
+                self.driver.quit()
+            except Exception:
+                self.log_error('Error quitting headless driver')
+                return
 
-        try:
-            # Selenium irá buscar o chromedriver automaticamente no PATH
-            self.driver = webdriver.Chrome(options=self.options)
-        except WebDriverException as e:
-            print('webdriver', e.__class__.__name__)
-            if os.path.exists(PROFILE_WHATSAPP_PATH):
-                shutil.rmtree(PROFILE_WHATSAPP_PATH)
-            raise e
+            self.options = Options()
+            self.options.add_argument(
+                r'user-data-dir={}'.format(PROFILE_WHATSAPP_PATH)
+            )
+
+            try:
+                # Selenium irá buscar o chromedriver automaticamente no PATH
+                self.driver = webdriver.Chrome(options=self.options)
+            except WebDriverException as e:
+                print('webdriver', e.__class__.__name__)
+                if os.path.exists(PROFILE_WHATSAPP_PATH):
+                    shutil.rmtree(PROFILE_WHATSAPP_PATH)
+                raise e
         self.driver.get('https://web.whatsapp.com/')
         self.driver.maximize_window()
 
@@ -184,7 +200,9 @@ class Whatsapp(LogFileMixin):
             # Verifica se não está na tela de QR code
             try:
                 qr_code = self.driver.find_element(
-                    By.XPATH, '//*[@id="app"]/div[1]/div[2]/div[2]/div[2]/div/div[2]/div[1]/div[2]/div/div/canvas'
+                    By.XPATH,
+                    '//*[@id="app"]/div[1]/div[2]/div[2]/div[2]/div/'
+                    'div[2]/div[1]/div[2]/div/div/canvas'
                 )
                 if qr_code:
                     self.log_error('Still showing QR code')
@@ -204,7 +222,7 @@ class Whatsapp(LogFileMixin):
 
     def check_number(self, phone_number: str) -> None:
 
-        formatted_phone_number = self.number_phone_formatting(phone_number)
+        formatted_contact_number = self.number_phone_formatting(phone_number)
 
         # Verifica se a interface ainda está ativa
         if not self._verify_interface_active():
@@ -213,17 +231,8 @@ class Whatsapp(LogFileMixin):
             return
 
         try:
-            # Tenta diferentes seletores para "Nova conversa"
             new_chat = None
-            selectors = [
-                '//*[@aria-label="Nova conversa"]',
-                '//*[@aria-label="New chat"]',
-                '//*[@data-testid="new-chat-button"]',
-                '//div[@title="Nova conversa"]',
-                '//div[@title="New chat"]'
-            ]
-
-            for selector in selectors:
+            for selector in SELECTORS_NEW_CHAT:
                 try:
                     new_chat = self.wait.until(
                         lambda x: x.find_element(By.XPATH, selector)
@@ -233,6 +242,7 @@ class Whatsapp(LogFileMixin):
                     continue
 
             if not new_chat:
+                self.log_error("Nova conversa button not found")
                 raise Exception("Nova conversa button not found")
 
             new_chat.click()
@@ -244,10 +254,7 @@ class Whatsapp(LogFileMixin):
 
         try:
             search_bar = self.wait.until(
-                lambda x: x.find_element(
-                    By.XPATH,
-                    '//*[@aria-label="Pesquisar nome ou número"]'
-                )
+                lambda x: x.find_element(By.XPATH, XPATH_SEARCH_BAR)
             )
             search_bar.send_keys(phone_number)
             time.sleep(2)
@@ -260,63 +267,61 @@ class Whatsapp(LogFileMixin):
             chat = self.wait.until(
                 lambda x: x.find_element(
                     By.XPATH,
-                    f'//*[@title="{formatted_phone_number}"]'
+                    f'//*[@title="{formatted_contact_number}"]'
                 )
             )
             time.sleep(1)
             chat.click()
             self.log_success(
-                f'{formatted_phone_number} chat clicked for title')
+                f'{formatted_contact_number} chat clicked for title')
             print('chat')
         except ElementClickInterceptedException:
+            ...
+            # try:
+            #     chat = self.wait.until(
+            #         lambda x: x.find_element(
+            #             By.XPATH,
+            #             '//*[@id="app"]/div/div[3]/div/div[2]/div[1]/span/div/span/div/div[2]/div[3]/div[2]/div[1]/div/span'
+            #         )
+            #     )
+            #     time.sleep(1)
+            #     chat.click()
+            #     self.log_success(
+            #         f'{phone_number} chat clicked for absolute path')
+            # except Exception:
             try:
-                chat = self.wait.until(
+                back_button = self.wait.until(
                     lambda x: x.find_element(
                         By.XPATH,
-                        '//*[@id="app"]/div/div[3]/div/div[2]/div[1]/span/div/span/div/div[2]/div[3]/div[2]/div[1]/div/span'
+                        '//*[@data-icon="back-refreshed"]'
                     )
                 )
-                time.sleep(1)
-                chat.click()
-                self.log_success(
-                    f'{phone_number} chat clicked for absolute path')
-            except Exception:
-                try:
-                    back_button = self.wait.until(
-                        lambda x: x.find_element(
-                            By.XPATH,
-                            f'//div[@aria-label="Voltar"]'
+                back_button.click()
+            except Exception as e:
+                self.log_error(f'Back_button {e.__class__.__name__}')
+                self.driver.get('https://web.whatsapp.com/')
+                while True:
+                    try:
+                        print('Logged in', e.__class__.__name__)
+                        self.wait.until(
+                            lambda x: x.find_element(
+                                By.XPATH, '//*[@id="app"]')
                         )
-                    )
-                    back_button.click()
-                except Exception as e:
-                    self.log_error(f'Back_button {e.__class__.__name__}')
-                    self.driver.get('https://web.whatsapp.com/')
-                    while True:
-                        try:
-                            print('Logged in', e.__class__.__name__)
-                            self.wait.until(
-                                lambda x: x.find_element(
-                                    By.XPATH, '//*[@id="app"]')
-                            )
-                        except Exception as e:
-                            print('Logged in', e.__class__.__name__)
-                            break
-                        else:
-                            self.log.log_success('Logged in successfully.')
-                            break
-                    return print(e.__class__.__name__, 'aria-label="voltar"')
-                else:
-                    return
+                    except Exception as e:
+                        print('Logged in', e.__class__.__name__)
+                        break
+                    else:
+                        self.log.log_success('Logged in successfully.')
+                        break
+                return print(e.__class__.__name__, 'aria-label="voltar"')
+            else:
+                return
         except TimeoutException as e:
             try:
                 self.log_error(
                     f'chat TimeoutException: {e.__class__.__name__}')
                 back_button = self.wait.until(
-                    lambda x: x.find_element(
-                        By.XPATH,
-                        f'//div[@aria-label="Voltar"]'
-                    )
+                    lambda x: x.find_element(By.XPATH, XPATH_BACK_BUTTON)
                 )
                 back_button.click()
             except Exception as e:
@@ -450,9 +455,13 @@ class Whatsapp(LogFileMixin):
                         try:
                             msg_box = self.wait.until(lambda x: x.find_element(
                                 By.XPATH,
-                                '//div[@contenteditable="true"][@data-tab="10"]'
+                                '//div[@contenteditable="true"]'
+                                '[@data-tab="10"]'
                             ))
-                            print("Debug: Found message box using contenteditable")
+                            print(
+                                "Debug: Found message box"
+                                " using contenteditable"
+                            )
                         except TimeoutException:
                             pass
 
@@ -582,14 +591,8 @@ class Whatsapp(LogFileMixin):
 
 if __name__ == '__main__':
     chat = Whatsapp('Beruchy Hamburgueria Delivery',
-                    'Recebemos o seu pedido.', True, True)
+                    'Recebemos o seu pedido.', False, False)
     chat.start()
     chat.check_number('99999999999')
-    for _ in range(20):
-        time.sleep(1)
-    chat.check_number('85981869957')
-    for _ in range(20):
-        time.sleep(1)
     chat.check_number('85981647142')
-    for _ in range(20):
-        time.sleep(1)
+    chat.check_number('85981647142')

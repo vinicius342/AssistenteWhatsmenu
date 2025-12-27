@@ -22,7 +22,11 @@ class Whatsmenu:
         self.wait_time = wait_time
         self.window_signal = False
         self.today = datetime.datetime.today().strftime('%d/%m/%Y')
-        self.driver = None
+        self.options = Options()
+        self.options.add_argument(f'user-data-dir={PROFILE_WHATSMENU_PATH}')
+        self.options.add_argument(r'--headless')
+        self.options.add_argument(r'--disable-print-preview')
+        self.driver = webdriver.Chrome(options=self.options)
         self.logged_in = False
         try:
             with open('list_checked.txt', 'r', encoding='utf8') as file:
@@ -43,13 +47,19 @@ class Whatsmenu:
 
     def start(self):
         # Sempre começa em headless, exceto se forçado a ser visível
-        self.options = Options()
-        self.options.add_argument(f'user-data-dir={PROFILE_WHATSMENU_PATH}')
-        self.options.add_argument(r'--disable-print-preview')
-        if not self.force_visible:
-            self.options.add_argument('--headless')
+        if self.force_visible:
+            try:
+                self.driver.quit()
+            except Exception:
+                print('Erro ao fechar driver headless do Whatsmenu')
+                return
+            self.options = Options()
+            self.options.add_argument(
+                f'user-data-dir={PROFILE_WHATSMENU_PATH}')
+            self.options.add_argument(r'--disable-print-preview')
 
-        self.driver = webdriver.Chrome(options=self.options)
+            self.driver = webdriver.Chrome(options=self.options)
+
         self.driver.get(
             'https://next.whatsmenu.com.br/auth/login?callbackUrl=https%3A'
             '%2F%2Fnext.whatsmenu.com.br%2Fdashboard%2Frequest')
@@ -201,7 +211,7 @@ class Whatsmenu:
                 # Tenta encontrar campo de email
                 for selector in email_selectors:
                     try:
-                        element = self.wait.until(
+                        self.wait.until(
                             lambda x: x.find_element(By.XPATH, selector)
                         )
                         email_found = True
@@ -212,7 +222,7 @@ class Whatsmenu:
                 # Tenta encontrar campo de senha
                 for selector in password_selectors:
                     try:
-                        element = self.wait.until(
+                        self.wait.until(
                             lambda x: x.find_element(By.XPATH, selector)
                         )
                         password_found = True
@@ -300,7 +310,7 @@ class Whatsmenu:
 
 
 if __name__ == '__main__':
-    from whatsapp import Whatsapp
+    from whatsapp import Whatsapp  # noqa: F811
 
     whats = Whatsapp('...', '...', False)
     whatsmenu = Whatsmenu(whats, True, '10')
